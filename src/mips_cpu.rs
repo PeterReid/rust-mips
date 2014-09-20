@@ -385,10 +385,10 @@ impl MipsCpu {
  //   self.advance_pc(4);
   }
   fn exec_sw(&mut self, instruction: u32) {
-    let (source, dest, value) = MipsCpu::decode_i_type(instruction);
-    let address = self.regs[dest] + value;
-    let val = self.regs[source];
-    self.set_mem(address, val);
+    let (address_base_reg, value_reg, offset) = MipsCpu::decode_i_type(instruction);
+    let address = self.regs[address_base_reg] + offset;
+    let value = self.regs[value_reg];
+    self.set_mem(address, value);
     self.advance_pc(4);
   }
 
@@ -496,6 +496,9 @@ fn run_int_fn(xs: &[u32], arg: u32) -> Result<u32, FaultType> {
   cpu.regs[4] = arg;
   cpu.set_mem(caller_address, 0x0c); // syscall
   cpu.set_mem(caller_address-4, 0x0c); // guard against stepping normally into the return site
+
+  // Set up stack pointer somewhere reasonable
+  cpu.regs[29] = 500;
 
   // Set execution at the beginning of the function under test
   cpu.pc = 32;
@@ -615,5 +618,43 @@ fn chacha_round() {
     0x03e00008, // jr      ra
     0x00461026, // xor     v0,v0,a2
   ], 40), Ok(437050147));
+}
+
+#[test]
+fn exclusive_signed_cmp() {
+  let code = [
+    0x27bdffe8, // addiu   sp,sp,-24
+    0xafbe0014, // sw      s8,20(sp)
+    0x03a0f021, // move    s8,sp
+    0xafbc0000, // sw      gp,0(sp)
+    0xafc40018, // sw      a0,24(s8)
+    0x8fc20018, // lw      v0,24(s8)
+    0x00000000, // nop
+    0x2842fffe, // slti    v0,v0,-2
+    0x1440000a, // bnez    v0,410 <exclusive_signed_cmp+0x4c>
+    0x00000000, // nop
+    0x8fc20018, // lw      v0,24(s8)
+    0x00000000, // nop
+    0x2842000c, // slti    v0,v0,12
+    0x10400005, // beqz    v0,410 <exclusive_signed_cmp+0x4c>
+    0x00000000, // nop
+    0x24020001, // li      v0,1
+    0xafc20008, // sw      v0,8(s8)
+    0x10000002, // b       414 <exclusive_signed_cmp+0x50>
+    0x00000000, // nop
+    0xafc00008, // sw      zero,8(s8)
+    0x8fc20008, // lw      v0,8(s8)
+    0x03c0e821, // move    sp,s8
+    0x8fbe0014, // lw      s8,20(sp)
+    0x27bd0018, // addiu   sp,sp,24
+    0x03e00008, // jr      ra
+    0x00000000, // nop
+  ];
+  assert_eq!(run_int_fn(code, 0xffff0000), Ok(0));
+  assert_eq!(run_int_fn(code, -3 as u32), Ok(0));
+  assert_eq!(run_int_fn(code, -2 as u32), Ok(1));
+  assert_eq!(run_int_fn(code, 0), Ok(1));
+  assert_eq!(run_int_fn(code, 11), Ok(1));
+  assert_eq!(run_int_fn(code, 12), Ok(0));
 }
 
