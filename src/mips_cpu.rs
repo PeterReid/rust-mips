@@ -1,5 +1,6 @@
 #[deriving(Show)]
 #[deriving(PartialEq)]
+#[deriving(Copy)]
 enum FaultType {
   UnalignedMemoryAccess,
   InvalidInstruction,
@@ -20,14 +21,14 @@ struct MipsCpu {
 impl MipsCpu {
   fn read_mem(&mut self, address: u32) -> u32 {
     if (address & 3) != 0 {
-      self.fault = Some(UnalignedMemoryAccess);
+      self.fault = Some(FaultType::UnalignedMemoryAccess);
       return 0;
     }
     self.mem[(address/4) as uint]
   }
   fn set_mem(&mut self, address: u32, val: u32) {
     if (address & 3) != 0 {
-      self.fault = Some(UnalignedMemoryAccess);
+      self.fault = Some(FaultType::UnalignedMemoryAccess);
     } else {
       self.mem[(address/4) as uint] = val;
     }
@@ -110,9 +111,9 @@ impl MipsCpu {
     self.next_pc = self.regs[address_reg];
   }
 
-  #[allow(unused_variable)]
+  #[allow(unused_variables)]
   fn exec_syscall(&mut self, instruction: u32) {
-    self.fault = Some(Syscall);
+    self.fault = Some(FaultType::Syscall);
     self.advance_pc(4);
   }
 
@@ -362,9 +363,9 @@ impl MipsCpu {
     self.regs[dest] = value << 16;
     self.advance_pc(4);
   }
-  #[allow(unused_variable)]
+  #[allow(unused_variables)]
   fn exec_lb(&mut self, instruction: u32) {
-    self.fault = Some(InvalidInstruction);
+    self.fault = Some(FaultType::InvalidInstruction);
     //let (source, dest, value) = MipsCpu::decode_i_type(instruction);
     //let address = self.regs[dest] + value;
     //self.regs[dest] = (self.read_mem[address & ~3] >> (24 - 8*(address&3)) ) & 0xff;
@@ -376,9 +377,9 @@ impl MipsCpu {
     self.regs[dest] = self.read_mem(address);
     self.advance_pc(4);
   }
-  #[allow(unused_variable)]
+  #[allow(unused_variables)]
   fn exec_sb(&mut self, instruction: u32) {
-    self.fault = Some(InvalidInstruction);
+    self.fault = Some(FaultType::InvalidInstruction);
 //    let (source, dest, value) = MipsCpu::decode_i_type(instruction);
  //   let address = self.regs[dest] + value;
  //   self.regs[dest] = (self.read_mem[address & ~3] >> (24 - 8*(address&3)) ) & 0xff;
@@ -426,7 +427,7 @@ impl MipsCpu {
           0x27 => self.exec_nor(instruction),
           0x2a => self.exec_slt(instruction),
           0x2b => self.exec_sltu(instruction),
-          _ => self.fault = Some(InvalidInstruction)
+          _ => self.fault = Some(FaultType::InvalidInstruction)
         }
 
       }
@@ -437,7 +438,7 @@ impl MipsCpu {
           0x01 => self.exec_bgez(instruction),
           0x10 => self.exec_bltzal(instruction),
           0x11 => self.exec_bgezal(instruction),
-          _ => self.fault = Some(InvalidInstruction)
+          _ => self.fault = Some(FaultType::InvalidInstruction)
         }
       }
       0x02 => self.exec_j(instruction),
@@ -459,7 +460,7 @@ impl MipsCpu {
       0x28 => self.exec_sb(instruction),
       0x2b => self.exec_sw(instruction),
       
-      _ => self.fault = Some(InvalidInstruction)
+      _ => self.fault = Some(FaultType::InvalidInstruction)
     }
   }
 
@@ -468,8 +469,9 @@ impl MipsCpu {
     while step_count < max_steps {
       match self.fault {
         Some(f) => return Some(f),
-        _ => self.step()
+        _ => {}
       }
+      self.step();
       step_count += 1;
     }
     return None;
@@ -511,12 +513,12 @@ fn run_int_fn(xs: &[u32], arg: u32) -> Result<u32, FaultType> {
 
   // Execute! But finitely. 
   return match cpu.run(5000) {
-    None => fail!("Step count exceeded"),
-    Some(Syscall) => {
+    None => panic!("Step count exceeded"),
+    Some(FaultType::Syscall) => {
       if cpu.pc == 1004 { // Syscall from the right spot
         Ok(cpu.regs[2]) // Calling convention puts the return int here (v0)
       } else {
-        Err(Syscall)
+        Err(FaultType::Syscall)
       }
     }
     Some(f) => Err(f)
@@ -536,7 +538,7 @@ fn triangle_sum() {
     0x00a32823, // subu    a1,a1,v1
     0x03e00008, // jr      ra
     0x00a01021, // move    v0,a1
-  ], 4), Ok(10));
+  ].as_slice(), 4), Ok(10));
 }
 
 #[test]
@@ -544,7 +546,7 @@ fn load_small_negative() {
   assert_eq!(run_int_fn([
     0x03e00008, // jr      ra
     0x2402fffa, // li      v0,-6
-  ], 0), Ok(-6));
+  ].as_slice(), 0), Ok(-6));
 }
 
 #[test]
@@ -553,7 +555,7 @@ fn load_large() {
     0x3c021000, // lui     v0,0x1000
     0x03e00008, // jr      ra
     0x3442fff8, // ori     v0,v0,0xfff8
-  ], 0), Ok(0x1000fff8));
+  ].as_slice(), 0), Ok(0x1000fff8));
 }
 
 #[test]
@@ -575,9 +577,9 @@ fn is_prime() {
     0x03e00008, // jr      ra
     0x00000000, // nop
   ];
-  assert_eq!(run_int_fn(code, 5), Ok(1));
-  assert_eq!(run_int_fn(code, 9), Ok(0));
-  assert_eq!(run_int_fn(code, 29), Ok(1));
+  assert_eq!(run_int_fn(code.as_slice(), 5), Ok(1));
+  assert_eq!(run_int_fn(code.as_slice(), 9), Ok(0));
+  assert_eq!(run_int_fn(code.as_slice(), 29), Ok(1));
 }
 
 #[test]
@@ -617,7 +619,7 @@ fn chacha_round() {
     0x00c33025, // or      a2,a2,v1
     0x03e00008, // jr      ra
     0x00461026, // xor     v0,v0,a2
-  ], 40), Ok(437050147));
+  ].as_slice(), 40), Ok(437050147));
 }
 
 #[test]
@@ -650,11 +652,11 @@ fn exclusive_signed_cmp() {
     0x03e00008, // jr      ra
     0x00000000, // nop
   ];
-  assert_eq!(run_int_fn(code, 0xffff0000), Ok(0));
-  assert_eq!(run_int_fn(code, -3 as u32), Ok(0));
-  assert_eq!(run_int_fn(code, -2 as u32), Ok(1));
-  assert_eq!(run_int_fn(code, 0), Ok(1));
-  assert_eq!(run_int_fn(code, 11), Ok(1));
-  assert_eq!(run_int_fn(code, 12), Ok(0));
+  assert_eq!(run_int_fn(code.as_slice(), 0xffff0000), Ok(0));
+  assert_eq!(run_int_fn(code.as_slice(), -3 as u32), Ok(0));
+  assert_eq!(run_int_fn(code.as_slice(), -2 as u32), Ok(1));
+  assert_eq!(run_int_fn(code.as_slice(), 0), Ok(1));
+  assert_eq!(run_int_fn(code.as_slice(), 11), Ok(1));
+  assert_eq!(run_int_fn(code.as_slice(), 12), Ok(0));
 }
 
