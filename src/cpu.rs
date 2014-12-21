@@ -1,36 +1,66 @@
+use std::cmp::min;
+
 #[deriving(Show)]
 #[deriving(PartialEq)]
 #[deriving(Copy)]
-enum FaultType {
+pub enum FaultType {
   UnalignedMemoryAccess,
   InvalidInstruction,
   Syscall,
+  OutOfMemory,
 }
 
-struct MipsCpu {
-  regs: [u32, ..32],
-  mem: [u32, ..1024],
+pub struct MipsCpu {
+  pub regs: [u32, ..32],
+  pub mem: Vec<u32>,
+  max_mem: u32,
   fault: Option<FaultType>,
-  pc: u32,
+  pub pc: u32,
   next_pc: u32,
   hi: u32,
   lo: u32,
-
 }
 
 impl MipsCpu {
+  pub fn new() -> MipsCpu {
+    MipsCpu {
+      regs: [0, ..32],
+      mem: Vec::from_fn(1024, |_| { 0 }),
+      max_mem: 4000000,
+      fault: None,
+      pc: 0,
+      next_pc: 4,
+      hi: 0,
+      lo: 0,
+    }
+  }
+  
   fn read_mem(&mut self, address: u32) -> u32 {
     if (address & 3) != 0 {
       self.fault = Some(FaultType::UnalignedMemoryAccess);
       return 0;
     }
-    self.mem[(address/4) as uint]
+    let index = (address/4) as uint;
+    if index >= self.mem.len() {
+      return 0;
+    }
+    self.mem[index]
   }
   fn set_mem(&mut self, address: u32, val: u32) {
     if (address & 3) != 0 {
       self.fault = Some(FaultType::UnalignedMemoryAccess);
     } else {
-      self.mem[(address/4) as uint] = val;
+      if address > self.max_mem {
+        self.fault = Some(FaultType::OutOfMemory);
+        return;
+      }
+      let index = address/4;
+      if index >= self.mem.len() as u32 {
+        let grow_to = if index*3>index { min(self.max_mem, index*3/2) } else { self.max_mem };
+        let grow_amount = (grow_to as uint) - self.mem.len();
+        self.mem.grow(grow_amount, 0);
+      }
+      self.mem[index as uint] = val;
     }
   }
 
@@ -363,27 +393,61 @@ impl MipsCpu {
     self.regs[dest] = value << 16;
     self.advance_pc(4);
   }
-  #[allow(unused_variables)]
   fn exec_lb(&mut self, instruction: u32) {
-    self.fault = Some(FaultType::InvalidInstruction);
-    //let (source, dest, value) = MipsCpu::decode_i_type(instruction);
-    //let address = self.regs[dest] + value;
-    //self.regs[dest] = (self.read_mem[address & ~3] >> (24 - 8*(address&3)) ) & 0xff;
-    //self.advance_pc(4);
+    let (source, dest, value) = MipsCpu::decode_i_type(instruction);
+    let address = self.regs[source] + value;
+    let word = self.read_mem(address & 3.not());
+    let byte = (word >> (8 * ((address as uint) & 3))) & 0xff;
+    self.regs[dest] = ((byte as i8) as i32) as u32;
+    self.advance_pc(4);
+  }
+  fn exec_lbu(&mut self, instruction: u32) {
+    let (source, dest, value) = MipsCpu::decode_i_type(instruction);
+    let address = self.regs[source] + value;
+    let word = self.read_mem(address & 3.not());
+    let byte = (word >> (8 * ((address as uint) & 3))) & 0xff;
+    self.regs[dest] = byte;
+    self.advance_pc(4);
+  }
+  fn exec_lhu(&mut self, instruction: u32) {
+    let (source, dest, offset) = MipsCpu::decode_i_type(instruction);
+    let address = self.regs[source] + offset;
+    if (address & 1) != 0 {
+        self.fault = Some(FaultType::UnalignedMemoryAccess);
+    }
+    let word = self.read_mem(address & 3.not());
+    let halfword = (word >> (8 * ((address as uint) & 3))) & 0xffff;
+    self.regs[dest] = halfword;
+    self.advance_pc(4);
+  }
+  fn exec_lh(&mut self, instruction: u32) {
+    let (source, dest, offset) = MipsCpu::decode_i_type(instruction);
+    let address = self.regs[source] + offset;
+    if (address & 1) != 0 {
+        self.fault = Some(FaultType::UnalignedMemoryAccess);
+    }
+    let word = self.read_mem(address & 3.not());
+    let halfword = (word >> (8 * ((address as uint) & 3))) & 0xffff;
+    self.regs[dest] = ((halfword as i16) as i32) as u32;
+    self.advance_pc(4);
   }
   fn exec_lw(&mut self, instruction: u32) {
     let (source, dest, value) = MipsCpu::decode_i_type(instruction);
     let address = self.regs[source] + value;
     self.regs[dest] = self.read_mem(address);
+    println("LW read {:x} from {:x}", self.regs[dest], address);
     self.advance_pc(4);
   }
   #[allow(unused_variables)]
   fn exec_sb(&mut self, instruction: u32) {
-    self.fault = Some(FaultType::InvalidInstruction);
-//    let (source, dest, value) = MipsCpu::decode_i_type(instruction);
- //   let address = self.regs[dest] + value;
- //   self.regs[dest] = (self.read_mem[address & ~3] >> (24 - 8*(address&3)) ) & 0xff;
- //   self.advance_pc(4);
+    let (address_base_reg, value_reg, offset) = MipsCpu::decode_i_type(instruction);
+    let address = self.regs[address_base_reg] + offset;
+    let existing_word = self.read_mem(address & 3.not());
+    let shift = 8 * ((address as uint) & 3);
+    let masked_word = existing_word & (0xff<<shift).not();
+    let modified_word = masked_word | ((self.regs[value_reg]&0xff)<<shift);
+    self.set_mem(address, modified_word); 
+    self.advance_pc(4);
   }
   fn exec_sw(&mut self, instruction: u32) {
     let (address_base_reg, value_reg, offset) = MipsCpu::decode_i_type(instruction);
@@ -394,11 +458,11 @@ impl MipsCpu {
   }
 
   
-  fn step(&mut self) {
+  pub fn step(&mut self) {
     let instruction_address = self.pc;
     let instruction = self.read_mem(instruction_address);
     let opcode = instruction >> 26;
-    println!("Executing instruction {} ({})", instruction, opcode);
+    println!("Executing instruction 0x{:x} ({}) from address {}", instruction, opcode, instruction_address);
 
     match opcode {
       0x00 => {
@@ -456,7 +520,10 @@ impl MipsCpu {
       0x0e => self.exec_xori(instruction),
       0x0f => self.exec_lui(instruction),
       0x20 => self.exec_lb(instruction),
+      0x21 => self.exec_lh(instruction),
       0x23 => self.exec_lw(instruction),
+      0x24 => self.exec_lbu(instruction),
+      0x25 => self.exec_lhu(instruction),
       0x28 => self.exec_sb(instruction),
       0x2b => self.exec_sw(instruction),
       
@@ -464,7 +531,7 @@ impl MipsCpu {
     }
   }
 
-  fn run(&mut self, max_steps: uint) -> Option<FaultType> {
+  pub fn run(&mut self, max_steps: uint) -> Option<FaultType> {
     let mut step_count = 0;
     while step_count < max_steps {
       match self.fault {
@@ -479,18 +546,13 @@ impl MipsCpu {
 
 }
 
-
+#[cfg(test)]
+mod test {
+use cpu::FaultType;
+use cpu::MipsCpu;
 
 fn run_int_fn(xs: &[u32], arg: u32) -> Result<u32, FaultType> {
-  let mut cpu = MipsCpu {
-    regs: [0, ..32],
-    mem: [0, ..1024],
-    fault: None,
-    pc: 0,
-    next_pc: 4,
-    hi: 0,
-    lo: 0,
-  };
+  let mut cpu = MipsCpu::new(); 
 
   // Set up a fake call site which will issue a SYSCALL as soon as the function returns
   let caller_address = 1000;
@@ -660,3 +722,28 @@ fn exclusive_signed_cmp() {
   assert_eq!(run_int_fn(code.as_slice(), 12), Ok(0));
 }
 
+#[test]
+fn unsigned_byte() {
+  let code = [
+    0x27bdffe8, // addiu   sp,sp,-24
+    0xafbe0014, // sw      s8,20(sp)
+    0x03a0f021, // move    s8,sp
+    0xafbc0000, // sw      gp,0(sp)
+    0xafc40018, // sw      a0,24(s8)
+    0x8fc20018, // lw      v0,24(s8)
+    0x00000000, // nop
+    0xafc20008, // sw      v0,8(s8)
+    0x93c2000b, // lbu     v0,11(s8)
+    0x00000000, // nop
+    0xa3c20008, // sb      v0,8(s8)
+    0x8fc20008, // lw      v0,8(s8)
+    0x03c0e821, // move    sp,s8
+    0x8fbe0014, // lw      s8,20(sp)
+    0x27bd0018, // addiu   sp,sp,24
+    0x03e00008, // jr      ra
+    0x00000000, // nop
+  ];
+  assert_eq!(run_int_fn(code.as_slice(), 0x12345678), Ok(0x12345612));
+
+}
+}
