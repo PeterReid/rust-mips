@@ -435,7 +435,7 @@ impl MipsCpu {
     let (source, dest, value) = MipsCpu::decode_i_type(instruction);
     let address = self.regs[source] + value;
     self.regs[dest] = self.read_mem(address);
-    println("LW read {:x} from {:x}", self.regs[dest], address);
+    println!("LW read {:x} from {:x}", self.regs[dest], address);
     self.advance_pc(4);
   }
   #[allow(unused_variables)]
@@ -550,6 +550,7 @@ impl MipsCpu {
 mod test {
 use cpu::FaultType;
 use cpu::MipsCpu;
+
 
 fn run_int_fn(xs: &[u32], arg: u32) -> Result<u32, FaultType> {
   let mut cpu = MipsCpu::new(); 
