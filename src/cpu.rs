@@ -26,7 +26,7 @@ impl MipsCpu {
     MipsCpu {
       regs: [0, ..32],
       mem: Vec::from_fn(1024, |_| { 0 }),
-      max_mem: 4000000,
+      max_mem: 0x4000000,
       fault: None,
       pc: 0,
       next_pc: 4,
@@ -35,7 +35,7 @@ impl MipsCpu {
     }
   }
   
-  fn read_mem(&mut self, address: u32) -> u32 {
+  pub fn read_mem(&mut self, address: u32) -> u32 {
     if (address & 3) != 0 {
       self.fault = Some(FaultType::UnalignedMemoryAccess);
       return 0;
@@ -46,7 +46,8 @@ impl MipsCpu {
     }
     self.mem[index]
   }
-  fn set_mem(&mut self, address: u32, val: u32) {
+  
+  pub fn set_mem(&mut self, address: u32, val: u32) {
     if (address & 3) != 0 {
       self.fault = Some(FaultType::UnalignedMemoryAccess);
     } else {
@@ -62,6 +63,10 @@ impl MipsCpu {
       }
       self.mem[index as uint] = val;
     }
+  }
+  
+  pub fn clear_fault(&mut self) {
+      self.fault = None;
   }
 
   fn decode_r_type(instruction: u32) -> (uint, uint, uint, uint) {
