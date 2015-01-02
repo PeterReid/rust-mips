@@ -250,7 +250,6 @@ impl MipsCpu {
     let (src1, src2, dest, _) = MipsCpu::decode_r_type(instruction);
     let a = self.regs[src1] as i32;
     let b = self.regs[src2] as i32;
-    println!("Comparing (<) regs {}(={}) and {} (={}), storing into {}", src1, a, src2, b, dest);
     self.regs[dest] = if a < b { 1 } else { 0 };
     self.advance_pc(4);
   }
@@ -316,7 +315,6 @@ impl MipsCpu {
 
   fn exec_beq(&mut self, instruction: u32) {
     let (reg1, reg2, offset) = MipsCpu::decode_i_type(instruction);
-    println!("Comparing registers {} and {}", reg1, reg2);
     if self.regs[reg1] == self.regs[reg2] {
       self.advance_pc(offset<<2);
     } else {
@@ -440,7 +438,6 @@ impl MipsCpu {
     let (source, dest, value) = MipsCpu::decode_i_type(instruction);
     let address = self.regs[source] + value;
     self.regs[dest] = self.read_mem(address);
-    println!("LW read {:x} from {:x}", self.regs[dest], address);
     self.advance_pc(4);
   }
   #[allow(unused_variables)]
@@ -462,12 +459,11 @@ impl MipsCpu {
     self.advance_pc(4);
   }
 
-  
   pub fn step(&mut self) {
     let instruction_address = self.pc;
     let instruction = self.read_mem(instruction_address);
     let opcode = instruction >> 26;
-    println!("Executing instruction 0x{:x} ({}) from address {}", instruction, opcode, instruction_address);
+    //println!("Executing instruction 0x{:x} ({}) from address {}", instruction, opcode, instruction_address);
 
     match opcode {
       0x00 => {
@@ -501,7 +497,7 @@ impl MipsCpu {
 
       }
       0x01 => {
-        let subop = (instruction >> 11) & 0x1f;
+        let subop = (instruction >> 16) & 0x1f;
         match subop {
           0x00 => self.exec_bltz(instruction),
           0x01 => self.exec_bgez(instruction),
