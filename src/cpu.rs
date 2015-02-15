@@ -26,7 +26,7 @@ impl MipsCpu {
   pub fn new() -> MipsCpu {
     MipsCpu {
       regs: [0; 32],
-      mem: [0..1024].iter().map(|_| 0).collect(),
+      mem: (0..1024).map(|_| 0).collect(),
       max_mem: 0x4000000,
       fault: None,
       pc: 0,
