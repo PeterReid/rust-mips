@@ -1,8 +1,9 @@
 use std::cmp::min;
+use std::ops::Not;
 
-#[deriving(Show)]
-#[deriving(PartialEq)]
-#[deriving(Copy)]
+#[derive(Debug)]
+#[derive(PartialEq)]
+#[derive(Copy)]
 pub enum FaultType {
   UnalignedMemoryAccess,
   InvalidInstruction,
@@ -11,7 +12,7 @@ pub enum FaultType {
 }
 
 pub struct MipsCpu {
-  pub regs: [u32, ..32],
+  pub regs: [u32; 32],
   pub mem: Vec<u32>,
   max_mem: u32,
   fault: Option<FaultType>,
@@ -24,8 +25,8 @@ pub struct MipsCpu {
 impl MipsCpu {
   pub fn new() -> MipsCpu {
     MipsCpu {
-      regs: [0, ..32],
-      mem: Vec::from_fn(1024, |_| { 0 }),
+      regs: [0; 32],
+      mem: [0..1024].iter().map(|_| 0).collect(),
       max_mem: 0x4000000,
       fault: None,
       pc: 0,
@@ -40,7 +41,7 @@ impl MipsCpu {
       self.fault = Some(FaultType::UnalignedMemoryAccess);
       return 0;
     }
-    let index = (address/4) as uint;
+    let index = (address/4) as usize;
     if index >= self.mem.len() {
       return 0;
     }
@@ -58,10 +59,9 @@ impl MipsCpu {
       let index = address/4;
       if index >= self.mem.len() as u32 {
         let grow_to = if index*3>index { min(self.max_mem, index*3/2) } else { self.max_mem };
-        let grow_amount = (grow_to as uint) - self.mem.len();
-        self.mem.grow(grow_amount, 0);
+        self.mem.resize(grow_to as usize, 0);
       }
-      self.mem[index as uint] = val;
+      self.mem[index as usize] = val;
     }
   }
   
@@ -69,25 +69,25 @@ impl MipsCpu {
       self.fault = None;
   }
 
-  fn decode_r_type(instruction: u32) -> (uint, uint, uint, uint) {
+  fn decode_r_type(instruction: u32) -> (usize, usize, usize, usize) {
     (
-      ((instruction >> 21) & 0x1f) as uint,
-      ((instruction >> 16) & 0x1f) as uint,
-      ((instruction >> 11) & 0x1f) as uint,
-      ((instruction >> 6) & 0x1f) as uint
+      ((instruction >> 21) & 0x1f) as usize,
+      ((instruction >> 16) & 0x1f) as usize,
+      ((instruction >> 11) & 0x1f) as usize,
+      ((instruction >> 6) & 0x1f) as usize
     )
   }
-  fn decode_i_type(instruction: u32) -> (uint, uint, u32) {
+  fn decode_i_type(instruction: u32) -> (usize, usize, u32) {
     (
-      ((instruction >> 21) & 0x1f) as uint,
-      ((instruction >> 16) & 0x1f) as uint,
+      ((instruction >> 21) & 0x1f) as usize,
+      ((instruction >> 16) & 0x1f) as usize,
       (((instruction & 0xffff) as i16) as i32) as u32
     )
   }
-  fn decode_i_type_unsigned(instruction: u32) -> (uint, uint, u32) {
+  fn decode_i_type_unsigned(instruction: u32) -> (usize, usize, u32) {
     (
-      ((instruction >> 21) & 0x1f) as uint,
-      ((instruction >> 16) & 0x1f) as uint,
+      ((instruction >> 21) & 0x1f) as usize,
+      ((instruction >> 16) & 0x1f) as usize,
       instruction & 0xffff
     )
   }
@@ -122,7 +122,7 @@ impl MipsCpu {
     let (amount_reg, src, dst, _) = MipsCpu::decode_r_type(instruction);
     let amount = self.regs[amount_reg];
     self.regs[dst] = if amount < 32 {
-        self.regs[src] << (amount as uint)
+        self.regs[src] << (amount as usize)
       } else {
         0
       };
@@ -133,7 +133,7 @@ impl MipsCpu {
     let (amount_reg, src, dst, _) = MipsCpu::decode_r_type(instruction);
     let amount = self.regs[amount_reg];
     self.regs[dst] = if amount < 32 {
-        self.regs[src] >> (amount as uint)
+        self.regs[src] >> (amount as usize)
       } else {
         0
       };
@@ -399,16 +399,16 @@ impl MipsCpu {
   fn exec_lb(&mut self, instruction: u32) {
     let (source, dest, value) = MipsCpu::decode_i_type(instruction);
     let address = self.regs[source] + value;
-    let word = self.read_mem(address & 3.not());
-    let byte = (word >> (8 * ((address as uint) & 3))) & 0xff;
+    let word = self.read_mem(address & 3u32.not());
+    let byte = (word >> (8 * ((address as usize) & 3))) & 0xff;
     self.regs[dest] = ((byte as i8) as i32) as u32;
     self.advance_pc(4);
   }
   fn exec_lbu(&mut self, instruction: u32) {
     let (source, dest, value) = MipsCpu::decode_i_type(instruction);
     let address = self.regs[source] + value;
-    let word = self.read_mem(address & 3.not());
-    let byte = (word >> (8 * ((address as uint) & 3))) & 0xff;
+    let word = self.read_mem(address & 3u32.not());
+    let byte = (word >> (8 * ((address as usize) & 3))) & 0xff;
     self.regs[dest] = byte;
     self.advance_pc(4);
   }
@@ -418,8 +418,8 @@ impl MipsCpu {
     if (address & 1) != 0 {
         self.fault = Some(FaultType::UnalignedMemoryAccess);
     }
-    let word = self.read_mem(address & 3.not());
-    let halfword = (word >> (8 * ((address as uint) & 3))) & 0xffff;
+    let word = self.read_mem(address & 3u32.not());
+    let halfword = (word >> (8 * ((address as usize) & 3))) & 0xffff;
     self.regs[dest] = halfword;
     self.advance_pc(4);
   }
@@ -429,8 +429,8 @@ impl MipsCpu {
     if (address & 1) != 0 {
         self.fault = Some(FaultType::UnalignedMemoryAccess);
     }
-    let word = self.read_mem(address & 3.not());
-    let halfword = (word >> (8 * ((address as uint) & 3))) & 0xffff;
+    let word = self.read_mem(address & 3u32.not());
+    let halfword = (word >> (8 * ((address as usize) & 3))) & 0xffff;
     self.regs[dest] = ((halfword as i16) as i32) as u32;
     self.advance_pc(4);
   }
@@ -444,9 +444,9 @@ impl MipsCpu {
   fn exec_sb(&mut self, instruction: u32) {
     let (address_base_reg, value_reg, offset) = MipsCpu::decode_i_type(instruction);
     let address = self.regs[address_base_reg] + offset;
-    let existing_word = self.read_mem(address & 3.not());
-    let shift = 8 * ((address as uint) & 3);
-    let masked_word = existing_word & (0xff<<shift).not();
+    let existing_word = self.read_mem(address & 3u32.not());
+    let shift = 8 * ((address as usize) & 3);
+    let masked_word = existing_word & (0xffu32<<shift).not();
     let modified_word = masked_word | ((self.regs[value_reg]&0xff)<<shift);
     self.set_mem(address, modified_word); 
     self.advance_pc(4);
@@ -532,7 +532,7 @@ impl MipsCpu {
     }
   }
 
-  pub fn run(&mut self, max_steps: uint) -> Option<FaultType> {
+  pub fn run(&mut self, max_steps: usize) -> Option<FaultType> {
     let mut step_count = 0;
     while step_count < max_steps {
       match self.fault {
@@ -580,7 +580,7 @@ fn run_int_fn(xs: &[u32], arg: u32) -> Result<u32, FaultType> {
     None => panic!("Step count exceeded"),
     Some(FaultType::Syscall) => {
       if cpu.pc == 1004 { // Syscall from the right spot
-        Ok(cpu.regs[2]) // Calling convention puts the return int here (v0)
+        Ok(cpu.regs[2]) // Calling convention puts the return isize here (v0)
       } else {
         Err(FaultType::Syscall)
       }
