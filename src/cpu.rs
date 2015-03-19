@@ -1,5 +1,6 @@
 use std::cmp::min;
 use std::ops::Not;
+use std::intrinsics;
 
 #[derive(Debug)]
 #[derive(PartialEq)]
@@ -21,6 +22,17 @@ pub struct MipsCpu {
   hi: u32,
   lo: u32,
 }
+
+fn plus(x: u32, y: u32) -> u32 {
+  unsafe { intrinsics::overflowing_add(x, y) }
+}
+fn sub(x: u32, y: u32) -> u32 {
+  unsafe { intrinsics::overflowing_sub(x, y) }
+}
+fn mul(x: u32, y: u32) -> u32 {
+  unsafe { intrinsics::overflowing_mul(x, y) }
+}
+
 
 impl MipsCpu {
   pub fn new() -> MipsCpu {
@@ -97,7 +109,7 @@ impl MipsCpu {
 
   fn advance_pc(&mut self, delta: u32) {
     self.pc = self.next_pc;
-    self.next_pc += delta;
+    self.next_pc = plus(self.next_pc, delta);
   }
 
   fn exec_sll(&mut self, instruction: u32) {
@@ -166,13 +178,13 @@ impl MipsCpu {
 
   fn exec_mult(&mut self, instruction: u32) {
     let (x_reg, y_reg, _, _) = MipsCpu::decode_r_type(instruction);
-    self.lo = self.regs[x_reg] * self.regs[y_reg];
+    self.lo = mul(self.regs[x_reg], self.regs[y_reg] );
     self.advance_pc(4);
   }
 
   fn exec_multu(&mut self, instruction: u32) {
     let (x_reg, y_reg, _, _) = MipsCpu::decode_r_type(instruction);
-    self.lo = self.regs[x_reg] * self.regs[y_reg];
+    self.lo = mul( self.regs[x_reg], self.regs[y_reg] );
     self.advance_pc(4);
   }
 
@@ -200,25 +212,25 @@ impl MipsCpu {
 
   fn exec_add(&mut self, instruction: u32) {
     let (src1, src2, dest, _) = MipsCpu::decode_r_type(instruction);
-    self.regs[dest] = self.regs[src1] + self.regs[src2];
+    self.regs[dest] = plus(self.regs[src1], self.regs[src2]);
     self.advance_pc(4);
   }
 
   fn exec_addu(&mut self, instruction: u32) {
     let (src1, src2, dest, _) = MipsCpu::decode_r_type(instruction);
-    self.regs[dest] = self.regs[src1] + self.regs[src2];
+    self.regs[dest] = plus(self.regs[src1], self.regs[src2]);
     self.advance_pc(4);
   }
 
   fn exec_sub(&mut self, instruction: u32) {
     let (src1, src2, dest, _) = MipsCpu::decode_r_type(instruction);
-    self.regs[dest] = self.regs[src1] - self.regs[src2];
+    self.regs[dest] = sub(self.regs[src1], self.regs[src2]);
     self.advance_pc(4);
   }
 
   fn exec_subu(&mut self, instruction: u32) {
     let (src1, src2, dest, _) = MipsCpu::decode_r_type(instruction);
-    self.regs[dest] = self.regs[src1] - self.regs[src2];
+    self.regs[dest] = sub(self.regs[src1], self.regs[src2]);
     self.advance_pc(4);
   }
 
@@ -283,7 +295,7 @@ impl MipsCpu {
   fn exec_bltzal(&mut self, instruction: u32) {
     let (cmp_reg, _, offset) = MipsCpu::decode_i_type(instruction);
     if (self.regs[cmp_reg] as i32) < 0 {
-      self.regs[31] = self.next_pc + 4;
+      self.regs[31] = plus(self.next_pc, 4);
       self.advance_pc(offset<<2);
     } else {
       self.advance_pc(4);
@@ -293,7 +305,7 @@ impl MipsCpu {
   fn exec_bgezal(&mut self, instruction: u32) {
     let (cmp_reg, _, offset) = MipsCpu::decode_i_type(instruction);
     if (self.regs[cmp_reg] as i32) >= 0 {
-      self.regs[31] = self.next_pc + 4;
+      self.regs[31] = plus(self.next_pc, 4);
       self.advance_pc(offset<<2);
     } else {
       self.advance_pc(4);
@@ -308,7 +320,7 @@ impl MipsCpu {
 
   fn exec_jal(&mut self, instruction: u32) {
     let target = MipsCpu::decode_j_type(instruction);
-    self.regs[31] = self.next_pc + 4;
+    self.regs[31] = plus(self.next_pc, 4);
     self.pc = self.next_pc;
     self.next_pc = (self.pc & 0xf0000000) | (target << 2);
   }
@@ -351,13 +363,13 @@ impl MipsCpu {
 
   fn exec_addi(&mut self, instruction: u32) {
     let (source, dest, value) = MipsCpu::decode_i_type(instruction);
-    self.regs[dest] = self.regs[source] + value;
+    self.regs[dest] = plus(self.regs[source], value);
     self.advance_pc(4);
   }
 
   fn exec_addiu(&mut self, instruction: u32) {
     let (source, dest, value) = MipsCpu::decode_i_type(instruction);
-    self.regs[dest] = self.regs[source] + value;
+    self.regs[dest] = plus(self.regs[source], value);
     self.advance_pc(4);
   }
   
@@ -398,7 +410,7 @@ impl MipsCpu {
   }
   fn exec_lb(&mut self, instruction: u32) {
     let (source, dest, value) = MipsCpu::decode_i_type(instruction);
-    let address = self.regs[source] + value;
+    let address = plus(self.regs[source], value);
     let word = self.read_mem(address & 3u32.not());
     let byte = (word >> (8 * ((address as usize) & 3))) & 0xff;
     self.regs[dest] = ((byte as i8) as i32) as u32;
@@ -406,7 +418,7 @@ impl MipsCpu {
   }
   fn exec_lbu(&mut self, instruction: u32) {
     let (source, dest, value) = MipsCpu::decode_i_type(instruction);
-    let address = self.regs[source] + value;
+    let address = plus(self.regs[source], value);
     let word = self.read_mem(address & 3u32.not());
     let byte = (word >> (8 * ((address as usize) & 3))) & 0xff;
     self.regs[dest] = byte;
@@ -414,7 +426,7 @@ impl MipsCpu {
   }
   fn exec_lhu(&mut self, instruction: u32) {
     let (source, dest, offset) = MipsCpu::decode_i_type(instruction);
-    let address = self.regs[source] + offset;
+    let address = plus(self.regs[source], offset);
     if (address & 1) != 0 {
         self.fault = Some(FaultType::UnalignedMemoryAccess);
     }
@@ -425,7 +437,7 @@ impl MipsCpu {
   }
   fn exec_lh(&mut self, instruction: u32) {
     let (source, dest, offset) = MipsCpu::decode_i_type(instruction);
-    let address = self.regs[source] + offset;
+    let address = plus(self.regs[source], offset);
     if (address & 1) != 0 {
         self.fault = Some(FaultType::UnalignedMemoryAccess);
     }
@@ -436,14 +448,14 @@ impl MipsCpu {
   }
   fn exec_lw(&mut self, instruction: u32) {
     let (source, dest, value) = MipsCpu::decode_i_type(instruction);
-    let address = self.regs[source] + value;
+    let address = plus(self.regs[source], value);
     self.regs[dest] = self.read_mem(address);
     self.advance_pc(4);
   }
   #[allow(unused_variables)]
   fn exec_sb(&mut self, instruction: u32) {
     let (address_base_reg, value_reg, offset) = MipsCpu::decode_i_type(instruction);
-    let address = self.regs[address_base_reg] + offset;
+    let address = plus(self.regs[address_base_reg], offset);
     let existing_word = self.read_mem(address & 3u32.not());
     let shift = 8 * ((address as usize) & 3);
     let masked_word = existing_word & (0xffu32<<shift).not();
@@ -453,7 +465,7 @@ impl MipsCpu {
   }
   fn exec_sw(&mut self, instruction: u32) {
     let (address_base_reg, value_reg, offset) = MipsCpu::decode_i_type(instruction);
-    let address = self.regs[address_base_reg] + offset;
+    let address = plus(self.regs[address_base_reg], offset);
     let value = self.regs[value_reg];
     self.set_mem(address, value);
     self.advance_pc(4);
@@ -568,10 +580,10 @@ fn run_int_fn(xs: &[u32], arg: u32) -> Result<u32, FaultType> {
 
   // Set execution at the beginning of the function under test
   cpu.pc = 32;
-  cpu.next_pc = cpu.pc + 4;
+  cpu.next_pc = plus(cpu.pc, 4);
   // Copy the function under test into memory
   for (idx, instruction) in xs.iter().enumerate() {
-    let address = cpu.pc + (idx*4) as u32;
+    let address = plus(cpu.pc, (idx*4) as u32);
     cpu.set_mem(address, *instruction);
   }
 
